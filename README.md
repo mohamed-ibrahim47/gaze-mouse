@@ -8,7 +8,7 @@ real cursor, which snaps onto buttons and links. A long blink clicks. Looking at
 screen slides out a strip of large buttons for scrolling, right click, select/drag, the keyboard and
 pause. Everything runs on your computer. No camera images leave it.
 
-> **Status:** early development. Plan 1 (core control) is being built. Not ready for daily use yet.
+> **Status:** early development. Plan 1 (core control) is built and being tested on real laptops ([test guide](docs/test-log.md)). Not ready for daily use yet.
 
 ## How it works
 
