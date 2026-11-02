@@ -78,7 +78,7 @@ class CalibrationSession:
         s = np.array(s)
         dist = np.linalg.norm(s[:, :2] - np.median(s[:, :2], axis=0), axis=1)
         kept = s[dist <= OUTLIER_RADIUS]
-        return kept if len(kept) else None
+        return kept if len(kept) >= MIN_SAMPLES else None
 
     def _compute(self) -> CalibrationResult:
         calib, valid = [], []

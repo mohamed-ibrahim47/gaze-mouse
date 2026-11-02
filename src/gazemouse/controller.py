@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Callable
 
 from .actions import VK_ESCAPE, Actuator
-from .blink import BlinkDetector, BlinkEvent, GazeHistory, PressTrigger
+from .blink import AIM_BACK_S, BlinkDetector, BlinkEvent, GazeHistory, PressTrigger
 from .geometry import Rect
 from .snap import snap
 from .strip import StripButton, StripLayout, StripReveal
@@ -17,6 +17,9 @@ MIN_MOVE_PX = 2
 SCROLL_PERIOD_S = 0.1
 SCROLL_KEEP_PAD = 0.03   # x W, around the pressed button
 DRAG_FACE_LOST_S = 3.0
+DRAG_NO_GAZE_S = 10.0    # face still there, but looking away or eyes shut
+DRAG_GOOD_GAZE_S = 1.0   # this much steady gaze clears the timers; a flicker of face doesn't
+FACE_GLITCH_S = 0.1      # a face lost for less than this inside a closure is one bad frame
 MESSAGE_S = 2.0
 # A click fires up to 0.2 + 1.5 + 0.6 s after its aim; a slow double up to about 4 s after.
 HISTORY_S = 5.0
@@ -52,14 +55,16 @@ class Controller:
         self.reveal = StripReveal(self.layout)
         self.history = GazeHistory(HISTORY_S)        # None samples mark "looking away"
         self.strip_history = GazeHistory(HISTORY_S)  # was the strip open at that moment?
+        self.aim_history = GazeHistory(HISTORY_S)    # where the gaze snapped to at that moment
         self.mode = Mode.NORMAL
         self.paused = False
         self.last_page_point = (screen_w / 2, screen_h / 2)
         self.last_move = None
         self.was_closed = False
         self.face_lost_since = None
+        self.drag_bad_since, self.drag_good_since = None, None
         self.scroll_rect, self.scroll_dir, self.next_wheel = None, 0, 0.0
-        self.message, self.message_until = None, 0.0
+        self.message, self.message_s, self.message_until = None, 0.0, None
         self.t = 0.0
 
     # --- outside controls ---
@@ -83,21 +88,27 @@ class Controller:
         self.t = t
         face_lost = gaze is None and closed is None
         self.face_lost_since = (self.face_lost_since if self.face_lost_since is not None else t) if face_lost else None
-        if closed is None and self.was_closed:
-            self.presses.cancel()  # the eyes didn't reopen, we just can't see them
-        self.was_closed = bool(closed)
+        eyes_shut = bool(closed)
+        if closed is None and self.was_closed:  # the eyes didn't reopen, we just can't see them
+            if face_lost and t - self.face_lost_since < FACE_GLITCH_S:
+                eyes_shut = True
+            else:
+                self.presses.cancel()
+                self.was_closed = False
+        else:
+            self.was_closed = eyes_shut
 
         away = gaze is not None and self._is_away(gaze)
         point = None if gaze is None or away else self._clamp(gaze)
         if point is not None or away or face_lost:
             self.history.push(t, point)
 
-        events = self.presses.update(t, bool(closed))
+        events = self.presses.update(t, eyes_shut)
         if self.paused or self.mode is Mode.DRAGGING:
             self.reveal.hide()
             visible = False
         else:
-            visible = self.reveal.update(t, point)
+            visible = self.reveal.update(t, None if away else gaze)  # unclamped: past the edge isn't at it
         self.strip_history.push(t, visible)
 
         for e in events:
@@ -107,15 +118,18 @@ class Controller:
         snapped = None
         if not self.paused:
             if self.mode is Mode.DRAGGING:
-                self._track_drag(t, point)
+                self._track_drag(t, point, face_lost)
             elif self.mode is Mode.SCROLLING:
                 self._track_scroll(t, point, away or face_lost)
             elif point is not None and not self._on_strip(point, visible):
                 snapped = self._track_page(point)
 
         hot = self.layout.button_at(point) if visible and point is not None else None
-        if t >= self.message_until:
-            self.message = None
+        if self.message is not None:
+            if self.message_until is None:
+                self.message_until = t + self.message_s
+            if t >= self.message_until:
+                self.message = None
         return OverlayState(point, snapped, visible, hot, self.mode, self.paused, self.message)
 
     # --- gaze tracking ---
@@ -152,14 +166,21 @@ class Controller:
         self._move(aimed)
         if not self.layout.edge_zone.contains(point):  # on its way to the strip isn't aiming at the page
             self.last_page_point = aimed
+        self.aim_history.push(self.t, aimed)
         return rect
 
-    def _track_drag(self, t, point) -> None:
+    def _track_drag(self, t, point, face_lost) -> None:
         if point is not None:
             self._move(point)
-        if self.face_lost_since is not None and t - self.face_lost_since > DRAG_FACE_LOST_S:
+            self.drag_good_since = t if self.drag_good_since is None else self.drag_good_since
+            if t - self.drag_good_since >= DRAG_GOOD_GAZE_S:
+                self.drag_bad_since = None
+        else:
+            self.drag_good_since = None
+            self.drag_bad_since = t if self.drag_bad_since is None else self.drag_bad_since
+        if self.drag_bad_since is not None and t - self.drag_bad_since > (DRAG_FACE_LOST_S if face_lost else DRAG_NO_GAZE_S):
             self.release()
-            self._say("Drag cancelled: face lost")
+            self.say("Drag cancelled: face lost" if face_lost else "Drag cancelled: can't see your gaze")
 
     def _track_scroll(self, t, point, gone) -> None:
         if gone or (point is not None and not self.scroll_rect.contains(point)):
@@ -182,6 +203,8 @@ class Controller:
         aim = self.history.at(e.aim_time)
         if aim is None:  # looking away, or no face at the time
             return
+        if self.history.has_gap(e.aim_time, e.aim_time + AIM_BACK_S):  # lids dropping as the eyes left the screen
+            return
         if self.mode is not Mode.DRAGGING and self.strip_history.at(e.aim_time):
             button = self.layout.button_at(aim)
             if button is not None:
@@ -189,9 +212,10 @@ class Controller:
                 return
             if self.layout.panel.contains(aim):  # a gap in the panel: never click what's behind it
                 return
-        self._press_page(e.kind, aim)
+        # What was snapped while aiming: by now the target list follows wherever the eyes went next.
+        self._press_page(e.kind, aim, self.aim_history.at(e.aim_time) or aim)
 
-    def _press_page(self, kind, aim) -> None:
+    def _press_page(self, kind, aim, snapped) -> None:
         if self.mode is Mode.DRAGGING:
             self._move_exact(aim)
             self.act.button_up("left")
@@ -200,15 +224,16 @@ class Controller:
             self._move_exact(aim)
             self.act.button_down("left")
             self.mode = Mode.DRAGGING
+            self.drag_bad_since = self.drag_good_since = None
         elif self.mode is Mode.RIGHT_ONCE:
-            self._move_exact(self._aim(aim).point)
+            self._move_exact(snapped)
             self.act.click("right")
             self.mode = Mode.NORMAL
         elif kind == "double":
-            self._move_exact(self._aim(aim).point)
+            self._move_exact(snapped)
             self.act.double_click()
         else:
-            self._move_exact(self._aim(aim).point)
+            self._move_exact(snapped)
             self.act.click("left")
 
     def _press_button(self, button: StripButton) -> None:
@@ -225,7 +250,8 @@ class Controller:
         elif button is StripButton.PAUSE:
             self.toggle_pause()
         elif button is StripButton.KEYBOARD:
-            self._say("Keyboard comes in a later version")
+            self.say("Keyboard comes in a later version")
 
-    def _say(self, text: str) -> None:
-        self.message, self.message_until = text, self.t + MESSAGE_S
+    def say(self, text: str, seconds: float = MESSAGE_S) -> None:
+        """Show a message for a while, counted from the next step."""
+        self.message, self.message_s, self.message_until = text, seconds, None

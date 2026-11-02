@@ -75,13 +75,15 @@ class Overlay(QWidget):
     def show_state(self, state: OverlayState, layout: StripLayout) -> None:
         old, self.state, self.layout_ = self.state, state, layout
         # Repainting a full-screen layered window every frame is expensive: when only the
-        # ring moved, repaint just around it.
-        if old is not None and replace(old, gaze=state.gaze) == state and state.mode is Mode.NORMAL:
+        # gaze moved, repaint just the ring and its badge.
+        if old is not None and replace(old, gaze=state.gaze) == state:
             for gaze in (old.gaze, state.gaze):
                 if gaze is not None:
                     x, y = to_logical(gaze, self.devicePixelRatioF())
                     d = RING_RADIUS + RING_WIDTH + 2
                     self.update(QRect(int(x - d), int(y - d), 2 * d + 1, 2 * d + 1))
+                    if state.mode in MODE_BADGES:
+                        self.update(QRect(int(x + 20), int(y + 20), 240, 42))
         else:
             self.update()
 

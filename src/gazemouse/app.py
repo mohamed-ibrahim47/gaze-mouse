@@ -4,10 +4,11 @@
 """
 import argparse
 import sys
-from dataclasses import asdict
+import time
+from dataclasses import asdict, replace
 from datetime import datetime
 
-from PySide6.QtCore import QObject, Qt
+from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -22,10 +23,16 @@ from .filters import OneEuro
 from .gaze_model import GazeModel
 from .landmarks import MODEL_PATH
 from .overlay import Overlay
-from .profiles import load_profile, save_profile
+from .profiles import load_profile, save_profile, valid_name
 from .snap import SNAP_RADIUS, BackgroundTargets, UiaTargetProvider
 
 MAX_ATTEMPTS = 3
+MAX_PCT = 12.0   # worse than this, the cursor would click the wrong things: never take control
+WATCHDOG_MS = 250
+NO_FRAMES_S = 1.0
+WARNING_S = 8.0
+CAMERA_LOST = "Camera stopped. Trying to reconnect…"
+TOO_WEAK_MESSAGE = "Calibration failed: accuracy was too low to use safely. Add light in front of you and try again."
 NO_EYES_MESSAGE = "Calibration failed: the camera couldn't see your eyes. Add light in front of you and try again."
 
 
@@ -34,11 +41,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     ap.add_argument("--profile", default="default", help="calibration profile name")
     ap.add_argument("--calibrate", action="store_true", help="calibrate even if a profile exists")
     ap.add_argument("--camera", type=int, default=None, help="camera index (default: first that works)")
-    return ap.parse_args(argv)
+    args = ap.parse_args(argv)
+    if not valid_name(args.profile):
+        ap.error(f"invalid profile name: {args.profile!r}")
+    return args
 
 
 def is_better(result: CalibrationResult, best: CalibrationResult | None) -> bool:
-    return result.ok and (best is None or result.error_pct < best.error_pct)
+    return result.ok and result.error_pct <= MAX_PCT and (best is None or result.error_pct < best.error_pct)
 
 
 def _tray_icon() -> QIcon:
@@ -66,7 +76,8 @@ class GazeApp(QObject):
         if tracker is None:
             from .tracker import TrackerThread
             tracker = TrackerThread(args.camera)
-            tracker.observed.connect(self.on_observed)
+        if hasattr(tracker, "ready"):
+            tracker.ready.connect(self.on_frame)
             tracker.camera_info.connect(self.on_camera_info)
             tracker.failed.connect(self.on_tracker_failed)
         self.tracker = tracker
@@ -83,6 +94,9 @@ class GazeApp(QObject):
         self.best, self.attempts = None, 0
         self.warning = ""
         self.exit_code = None
+        self.last_frame = None
+        self.timer = QTimer(self)  # the controller's timers only run on frames, so something must run without them
+        self.timer.timeout.connect(lambda: self.watchdog(time.perf_counter()))
         self.tray = self._make_tray() if QSystemTrayIcon.isSystemTrayAvailable() else None
 
     def _make_tray(self) -> QSystemTrayIcon:
@@ -108,6 +122,8 @@ class GazeApp(QObject):
         else:
             self.begin_calibration()
         self.tracker.start()
+        if self.interactive:
+            self.timer.start(WATCHDOG_MS)
 
     # --- calibration ---
 
@@ -146,20 +162,33 @@ class GazeApp(QObject):
         elif cancelled:
             self.quit(0)
         else:
-            self._fail(NO_EYES_MESSAGE)
+            self._fail(TOO_WEAK_MESSAGE if result.ok else NO_EYES_MESSAGE)
 
     def _adopt(self, result: CalibrationResult) -> None:
         self.model = result.model
-        camera = asdict(self.camera_info) if self.camera_info else None
-        save_profile(self.args.profile, result.model,
-                     {"error_pct": result.error_pct, "camera": camera, "screen": [self.w, self.h],
-                      "date": datetime.now().isoformat(timespec="seconds")})
         self.warning = ""
         if result.error_pct > GOOD_PCT:
             self.warning = f"Accuracy is weak ({result.error_pct:.1f}% of screen width). Try better light."
+        if not self._saved_is_better(result):
+            camera = asdict(self.camera_info) if self.camera_info else None
+            try:
+                save_profile(self.args.profile, result.model,
+                             {"error_pct": result.error_pct, "camera": camera, "screen": [self.w, self.h],
+                              "date": datetime.now().isoformat(timespec="seconds")})
+            except (OSError, ValueError) as e:  # the calibration is still good for this session
+                self.warning = f"{self.warning} Couldn't save your calibration: {e}".strip()
         if self.tray is not None:
             self.tray.setToolTip(self.warning or f"Gaze Mouse: {result.error_pct:.1f}% accuracy")
         self._start_control()
+        if self.warning:
+            self.controller.say(self.warning, WARNING_S)
+
+    def _saved_is_better(self, result: CalibrationResult) -> bool:
+        """A weak result is fine for now, but shouldn't replace a better profile for next time."""
+        saved = load_profile(self.args.profile)
+        if result.error_pct <= GOOD_PCT or saved is None or saved[1].get("screen") != [self.w, self.h]:
+            return False
+        return saved[1].get("error_pct", float("inf")) <= result.error_pct
 
     # --- control ---
 
@@ -172,7 +201,25 @@ class GazeApp(QObject):
         if self.controller is not None:
             self.controller.toggle_pause()
 
+    def on_frame(self) -> None:
+        latest = self.tracker.take()
+        if latest is not None:
+            self.on_observed(*latest)
+
+    def watchdog(self, now: float) -> None:
+        """Frames stopped: run the lost-face path anyway, so a held button can't stay held."""
+        if self.last_frame is None or now - self.last_frame <= NO_FRAMES_S:
+            return
+        if self.calib is not None:
+            self.calib.on_features(None, now)
+        elif self.controller is not None:
+            state = self.controller.step(now, None, None)
+            self.controller.say(CAMERA_LOST)
+            self.state = replace(state, message=CAMERA_LOST)
+            self.overlay.show_state(self.state, self.controller.layout)
+
     def on_observed(self, obs, t: float) -> None:
+        self.last_frame = t
         feat = extract_features(obs) if obs is not None else None
         if self.calib is not None:
             self.calib.on_features(feat, t)
@@ -184,8 +231,9 @@ class GazeApp(QObject):
             closed = None
             self.filter.reset()  # after a gap, start from where the eyes are, not a glide
         else:
-            closed = is_closed(obs.blink_left, obs.blink_right)
-            if feat is not None and not closed:
+            # Both must agree. Laughing or looking down raises the blink score with the lids still apart.
+            closed = is_closed(obs.blink_left, obs.blink_right) and feat is None
+            if feat is not None:
                 gaze = tuple(float(v) for v in self.filter(self.model.predict(feat), t))
                 self.targets.set_point(gaze)
         self.state = self.controller.step(t, gaze, closed)
@@ -202,14 +250,21 @@ class GazeApp(QObject):
     def _fail(self, message: str) -> None:
         self.warning = message
         print(message, file=sys.stderr)
+        if self.calib is not None:  # always on top: it would hide the dialog and block Esc
+            self.calib.close()
+            self.calib = None
         if self.interactive:
-            QMessageBox.critical(None, "Gaze Mouse", message)
+            self._show_error(message)
         self.quit(1)
+
+    def _show_error(self, message: str) -> None:
+        QMessageBox.critical(None, "Gaze Mouse", message)
 
     def quit(self, code: int = 0) -> None:
         if self.exit_code is not None:
             return
         self.exit_code = code
+        self.timer.stop()
         if self.controller is not None:
             self.controller.release()
         if self.calib is not None:

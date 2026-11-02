@@ -10,6 +10,9 @@ LONG_MAX_S = 1.5       # 1.5..2.0 s is ignored: neither a click nor a pause
 PAUSE_MIN_S = 2.0
 DOUBLE_WINDOW_S = 0.6  # a second long blink must start this soon after the first reopens
 AIM_BACK_S = 0.2       # aim at the gaze from just before the eyes started closing
+OPEN_CONFIRM_S = 0.08  # one open frame inside a closure is noise; this long open ends it
+MIN_CLOSED_FRAMES = 3  # fewer closed frames than this isn't evidence of a deliberate blink
+MAX_FRAME_GAP_S = 0.25 # a camera stall inside a closure makes its length meaningless
 EPS = 1e-9
 
 
@@ -38,21 +41,44 @@ class PressTrigger(Protocol):
 class BlinkDetector:
     def __init__(self):
         self.closed_since = None  # start time of the current closure
+        self.open_since = None    # first open frame after it, until OPEN_CONFIRM_S confirms the end
+        self.closed_frames = 0
+        self.stalled = False      # the camera stalled during this closure
+        self.need_open = False    # after cancel(): the eyes must be seen open before the next closure
+        self.last_t = None
         self.pending = None       # (aim_time, deadline) of a click waiting out the double window
 
     def update(self, t: float, closed: bool) -> list[BlinkEvent]:
         events = []
+        if self.closed_since is not None and self.last_t is not None and t - self.last_t > MAX_FRAME_GAP_S:
+            self.stalled = True
+        self.last_t = t
         self._flush(t, events)
-        if closed and self.closed_since is None:
-            self.closed_since = t
-        elif not closed and self.closed_since is not None:
-            start, self.closed_since = self.closed_since, None
-            self._closure_ended(start, t - start, t, events)
-            self._flush(t, events)
+        if closed:
+            if not self.need_open:
+                if self.closed_since is None:
+                    self.closed_since, self.closed_frames, self.stalled = t, 0, False
+                self.closed_frames += 1
+                self.open_since = None
+        else:
+            self.need_open = False
+            if self.closed_since is not None:
+                if self.open_since is None:
+                    self.open_since = t
+                if t - self.open_since >= OPEN_CONFIRM_S - EPS:
+                    self._finish_closure(t, events)
         return events
 
+    def _finish_closure(self, t, events):
+        start, reopened = self.closed_since, self.open_since
+        self.closed_since = self.open_since = None
+        if not self.stalled and self.closed_frames >= MIN_CLOSED_FRAMES:
+            self._closure_ended(start, reopened - start, reopened, events)
+        self._flush(t, events)
+
     def cancel(self) -> None:
-        self.closed_since = None
+        self.closed_since = self.open_since = None
+        self.need_open = True
 
     def _flush(self, t, events):
         """Emit the pending click once its window has passed, unless a closure is still running
@@ -89,6 +115,10 @@ class GazeHistory:
         self.samples.append((t, point))
         while self.samples and self.samples[0][0] < t - self.keep_s:
             self.samples.popleft()
+
+    def has_gap(self, t0: float, t1: float) -> bool:
+        """Was anything between these times a None sample (looking away, no face)?"""
+        return any(p is None for t, p in self.samples if t0 - EPS <= t <= t1 + EPS)
 
     def at(self, t: float) -> tuple[float, float] | None:
         """Latest sample at or before t."""

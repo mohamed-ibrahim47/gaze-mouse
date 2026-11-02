@@ -48,15 +48,16 @@ def linear_model():
     return m
 
 
-def face(t, blink=0.0, point=(W / 2, H / 2)):
+def face(t, blink=0.0, point=(W / 2, H / 2), lids=None):
     """An observation whose eye geometry makes extract_features read iris_x, iris_y_corner = point."""
     fx, fy = point[0] / W, point[1] / H
     p = np.zeros((478, 2))
     for eye, sign, x0, along in ((RIGHT_EYE, -1, 300, 1 - fx), (LEFT_EYE, 1, 400, fx)):  # right eye mirrored
         inner, outer = np.array([x0, 200.0]), np.array([x0 + sign * 50, 200.0])
         p[eye["inner"]], p[eye["outer"]] = inner, outer
-        p[eye["upper"]] = inner + [sign * 25, -10]
-        p[eye["lower"]] = inner + [sign * 25, 10]
+        lid = lids if lids is not None else (1 if blink >= 0.5 else 10)
+        p[eye["upper"]] = inner + [sign * 25, -lid]
+        p[eye["lower"]] = inner + [sign * 25, lid]
         p[eye["iris"]] = inner + [sign * 50 * along, 50 * fy]
     return FaceObservation(p, blink, blink, np.eye(4), t)
 
@@ -245,3 +246,153 @@ def test_camera_failure_quits_with_the_message(qapp):
 def test_is_better():
     assert is_better(good(5.0), None) and is_better(good(5.0), good(6.0)) and not is_better(good(7.0), good(6.0))
     assert not is_better(FAILED, None) and not is_better(FAILED, good(9.0))
+
+
+def blink_for(app, seconds, t0, **kw):
+    t = t0
+    for _ in range(int(seconds * 30)):
+        app.on_observed(face(t, **kw), t)
+        t += 1 / 30
+    return t
+
+
+def test_high_blink_score_with_open_lids_is_not_closed(qapp):  # review 3: laughing, looking down
+    with_profile()
+    app = make_app(qapp)
+    app.start()
+    t = blink_for(app, 1.0, 0.0, point=(300, 200))
+    t = blink_for(app, 0.6, t, blink=0.9, lids=10, point=(300, 200))
+    blink_for(app, 1.0, t, point=(300, 200))
+    assert app.actuator.named("click") == []
+    app.quit()
+
+
+def test_watchdog_cancels_a_drag_when_frames_stop(qapp):  # review 1
+    from gazemouse.controller import Mode
+    with_profile()
+    app = make_app(qapp)
+    app.start()
+    app.on_observed(face(0.0, point=(300, 200)), 0.0)
+    app.controller.mode = Mode.DRAGGING
+    for i in range(1, 30):
+        app.watchdog(i * 0.25)
+    assert app.controller.mode is Mode.NORMAL
+    assert app.actuator.calls[-1] == ("button_up", ("left",))
+    app.quit()
+
+
+def test_watchdog_says_the_camera_stopped(qapp):  # review 2
+    with_profile()
+    app = make_app(qapp)
+    app.start()
+    app.on_observed(face(0.0, point=(300, 200)), 0.0)
+    app.watchdog(0.5)
+    assert app.state.message is None
+    app.watchdog(1.5)
+    assert "Camera" in app.state.message and app.overlay.state.message == app.state.message
+    app.quit()
+
+
+def test_watchdog_ends_a_stuck_calibration(qapp):  # review 1: no frames, no way out otherwise
+    app = make_app(qapp)
+    app.start()
+    app.on_observed(None, 0.0)
+    seen = []
+    app.calib.on_features = lambda feat, t: seen.append((feat, t))
+    app.watchdog(2.0)
+    assert seen == [(None, 2.0)]
+    app.quit()
+
+
+def test_bad_profile_name_is_refused_at_the_command_line():  # review 10
+    with pytest.raises(SystemExit):
+        parse_args(["--profile", "a.b"])
+
+
+def test_failed_save_still_starts_control(qapp, monkeypatch):  # review 10
+    import gazemouse.app as appmod
+
+    def boom(*a):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(appmod, "save_profile", boom)
+    app = make_app(qapp)
+    app.start()
+    app.on_calibrated(good(4.0))
+    assert app.controller is not None and "save" in app.warning
+    app.quit()
+
+
+def test_failure_closes_the_calibration_window_first(qapp):  # review 11
+    app = make_app(qapp)
+    app.start()
+    win = app.calib
+    order = []
+    win.closeEvent = lambda e: order.append("closed")
+    app._show_error = lambda m: order.append("dialog")
+    app.interactive = True
+    app.on_tracker_failed("Could not open the webcam.")
+    assert order[:2] == ["closed", "dialog"]
+
+
+def test_terrible_accuracy_never_takes_control(qapp):  # review 12
+    app = make_app(qapp)
+    app.start()
+    for _ in range(3):
+        app.on_calibrated(good(30.0))
+    assert app.controller is None and app.exit_code == 1
+
+
+def test_weak_accuracy_warns_on_screen(qapp):  # review 12
+    app = make_app(qapp)
+    app.start()
+    app.on_calibrated(good(9.0))
+    app.on_calibrated(good(9.0))
+    app.on_calibrated(good(9.0))
+    app.on_observed(face(0.0, point=(300, 200)), 0.0)
+    assert "weak" in app.state.message
+    app.quit()
+
+
+def test_weak_recalibration_keeps_the_better_saved_profile(qapp):  # review 12
+    with_profile({"error_pct": 4.0})
+    app = make_app(qapp)
+    app.start()
+    app.recalibrate()
+    for _ in range(3):
+        app.on_calibrated(good(9.0))
+    assert load_profile("default")[1]["error_pct"] == 4.0
+    assert app.controller is not None
+    app.quit()
+
+
+def test_real_thread_drives_the_app(qapp):
+    # The wiring the other tests inject around: real signals, a fake camera behind them.
+    import time
+
+    from gazemouse.tracker import TrackerThread
+
+    class Cam:
+        times = []
+
+        def read(self):
+            time.sleep(0.005)
+            return np.zeros((4, 4, 3), np.uint8), time.perf_counter()
+
+        def info(self):
+            return CameraInfo(1280, 720, 30.0)
+
+        def close(self):
+            pass
+
+    with_profile()
+    th = TrackerThread(camera_factory=Cam, tracker_factory=lambda: lambda f, t: face(t, point=(300, 200)))
+    app = GazeApp(parse_args([]), W, H, tracker=th, actuator=FakeActuator(), provider=NoTargets())
+    app.interactive = False
+    app.start()
+    end = time.monotonic() + 3
+    while time.monotonic() < end and not app.actuator.named("move"):
+        qapp.processEvents()
+        time.sleep(0.002)
+    assert app.actuator.named("move") and app.camera_info == CameraInfo(1280, 720, 30.0)
+    app.quit()

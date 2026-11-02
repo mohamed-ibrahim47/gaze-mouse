@@ -34,6 +34,18 @@ Sit normally, with light in front of you, and look at the screen.
 
 If this fails, write down the output and stop. The later steps depend on it.
 
+Then check how your eyes read. Run this, and watch the numbers while you close your eyes, laugh, squint and
+look down at the keyboard. Stop it with Ctrl+C.
+
+```powershell
+.venv\Scripts\python -m gazemouse.tools.camcheck --watch
+```
+
+| Check | Target | Result |
+|---|---|---|
+| Eyes really closed | both blinks ≥ 0.50 and `lids closed` | |
+| Laughing, squinting, looking down | never both at once | |
+
 ## 3. Calibrate
 
 ```powershell
@@ -86,8 +98,19 @@ Read something normally for 10 minutes.
 | Accidental clicks | fewer than 1 | |
 | Accuracy on a fresh calibration afterwards | still 6% or less | |
 | CPU in Task Manager | note it | |
+| Cursor shakes on natural blinks | note it | |
 
-## 6. Other laptops (when you can)
+## 6. Things only a real machine can show
+
+| Check | Expected | Result |
+|---|---|---|
+| Snapping works with the app running (ring locks onto links) | yes | |
+| Scroll speed is comfortable for reading | note it | |
+| Unplug the webcam or use it in another app: a "Camera stopped" message appears, and control returns when it's free | yes | |
+| Sleep and wake the laptop: control comes back | yes | |
+| Start a drag, then leave the frame: the drag cancels after about 3 s | yes | |
+
+## 7. Other laptops (when you can)
 
 Try one other screen size or display scaling (100%, 150%). The ring and strip should still line up with
 where you're looking.

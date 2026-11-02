@@ -20,7 +20,7 @@ def gazemouse_home() -> Path:
     return home
 
 
-def _valid_name(name: str) -> bool:
+def valid_name(name: str) -> bool:
     # Letters in any script (Arabic names too), digits, space, _ and -. Nothing that can leave the folder.
     return (0 < len(name) <= MAX_NAME and name == name.strip()
             and all(c.isalnum() or c in " _-" for c in name) and name.upper() not in RESERVED)
@@ -31,7 +31,7 @@ def _path(name: str) -> Path:
 
 
 def save_profile(name: str, model: GazeModel, meta: dict) -> Path:
-    if not _valid_name(name):
+    if not valid_name(name):
         raise ValueError(f"invalid profile name: {name!r}")
     path = _path(name)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +50,7 @@ def save_profile(name: str, model: GazeModel, meta: dict) -> Path:
 
 def load_profile(name: str) -> tuple[GazeModel, dict] | None:
     """The saved model and meta, or None if missing or unusable (the caller recalibrates)."""
-    if not _valid_name(name):
+    if not valid_name(name):
         return None
     try:
         data = json.loads(_path(name).read_text(encoding="utf-8"))

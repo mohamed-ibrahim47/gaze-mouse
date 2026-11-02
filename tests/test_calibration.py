@@ -100,3 +100,11 @@ def test_phases_in_order_with_progress():
     assert phases[16][1] == (round(0.22 * W), round(0.25 * H))
     assert step.target is None
     assert abs(t - 21 * 1.8) < 0.1  # each dot is settle + sample long
+
+
+def test_dot_needs_enough_samples_after_outlier_removal():  # review 9: glare scatters the samples
+    s = CalibrationSession(W, H)
+    s.start(0.0)
+    s.samples[0] = [np.array([x, y, 0, 0, 0, 0, 0, 0], float)
+                    for x, y in ((0, 0), (1, 1), (-1, -1), (1, -1), (-1, 1))]
+    assert s._kept(0) is None

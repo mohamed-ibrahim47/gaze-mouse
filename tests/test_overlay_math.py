@@ -83,3 +83,11 @@ def test_hidden_strip_shows_only_the_edge_line(overlay):
     b = LAYOUT.buttons[StripButton.SCROLL_DOWN].center
     assert painted(overlay, state(), (round(b[0]), round(b[1]))).alpha() == 0
     assert painted(overlay, state(), (W - 2, H // 2)).alpha() > 0
+
+
+def test_moving_gaze_in_a_mode_repaints_only_near_it(overlay, monkeypatch):  # review 6
+    overlay.show_state(state(mode=Mode.DRAGGING), LAYOUT)
+    calls = []
+    monkeypatch.setattr(overlay, "update", lambda *a: calls.append(a))
+    overlay.show_state(state(mode=Mode.DRAGGING, gaze=(500, 400)), LAYOUT)
+    assert calls and all(len(a) == 1 for a in calls)  # regions, never the whole window

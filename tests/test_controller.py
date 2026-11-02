@@ -310,7 +310,7 @@ def test_face_back_in_time_keeps_the_drag(rig):
     rig.press(StripButton.SELECT)
     rig.run((0.6, P1, False))
     rig.blink_on(P1)
-    s = rig.run((2.0, None, None), (0.1, P2, False), (2.0, None, None), (0.1, P2, False))
+    s = rig.run((2.0, None, None), (1.1, P2, False), (2.0, None, None), (0.1, P2, False))
     assert s.mode is Mode.DRAGGING
 
 
@@ -362,3 +362,66 @@ def test_presses_are_pluggable():
     for i in range(30):
         c.step(i / 60, P1, False)
     assert fake.named("click") == [("click", ("left",))]
+
+
+def drag_rig():
+    rig = Rig()
+    rig.press(StripButton.SELECT)
+    rig.run((0.6, P1, False))
+    rig.blink_on(P1)
+    rig.fake.calls.clear()
+    return rig
+
+
+def test_flickering_face_still_cancels_the_drag():  # review 7
+    rig = drag_rig()
+    for _ in range(10):
+        s = rig.run((1.0, None, None), (1 / 60, P1, False))
+    assert s.mode is Mode.NORMAL and ("button_up", ("left",)) in rig.fake.calls
+
+
+def test_looking_away_for_long_cancels_the_drag():  # review 7
+    rig = drag_rig()
+    away = (1280, 1.3 * H)
+    assert rig.run((9.5, away, False)).mode is Mode.DRAGGING
+    assert rig.run((1.0, away, False)).mode is Mode.NORMAL
+    assert ("button_up", ("left",)) in rig.fake.calls
+
+
+def test_never_reopened_eyes_cancel_the_drag():  # review 7
+    rig = drag_rig()
+    s = rig.run((11.0, None, True))
+    assert s.mode is Mode.NORMAL and ("button_up", ("left",)) in rig.fake.calls
+
+
+def test_click_lands_on_what_was_snapped_when_aiming():  # review 5
+    fake = FakeActuator()
+    targets = [A]
+    rig = Rig()
+    rig.fake, rig.ctrl = fake, Controller(W, H, fake, lambda: targets, 0.06 * W)
+    near_a = (A.x - 40, A.center[1])
+    rig.run((0.5, near_a, False), (0.5, None, True))
+    targets[:] = [Rect(100, 1200, 80, 30)]  # the eyes moved on; the background list follows them
+    rig.run((0.8, (140, 1215), False))
+    i = fake.calls.index(("click", ("left",)))
+    assert fake.calls[i - 1] == ("move", A.center)
+
+
+def test_glance_at_keyboard_before_closing_does_not_click():  # review 3
+    rig = Rig()
+    rig.run((0.5, A.center, False), (0.1, (1280, 1.3 * H), False), (0.7, None, True), (1.0, A.center, False))
+    assert rig.fake.without_moves() == []
+
+
+def test_strip_stays_shut_just_past_the_edge():  # review 8
+    assert not Rig().run((1.0, (1.08 * W, 800), False)).strip_visible
+
+
+def test_strip_stays_shut_below_the_screen():  # review 8
+    assert not Rig().run((1.0, (0.97 * W, 1.09 * H), False)).strip_visible
+
+
+def test_one_lost_frame_does_not_split_a_pause():  # review 4
+    rig = Rig()
+    s = rig.run((0.5, P1, False), (1.2, None, True), (1 / 60, None, None), (1.2, None, True), (0.3, P1, False))
+    assert s.paused and rig.fake.without_moves() == []
