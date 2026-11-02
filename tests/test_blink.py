@@ -74,6 +74,12 @@ def test_still_closed_emits_nothing_yet(d):
     assert feed(d, [(1, False), (0.5, True)]) == []
 
 
+def test_cancel_forgets_the_closure(d):
+    feed(d, [(1, False), (0.5, True)])
+    d.cancel()
+    assert feed(d, [(1, False)]) == []
+
+
 def test_wink_and_squint_are_not_closed():  # Review Focus 2
     assert not is_closed(0.9, 0.3)
     assert not is_closed(0.45, 0.45)

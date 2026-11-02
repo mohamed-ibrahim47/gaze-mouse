@@ -30,6 +30,10 @@ class PressTrigger(Protocol):
 
     def update(self, t: float, closed: bool) -> list[BlinkEvent]: ...
 
+    def cancel(self) -> None:
+        """Forget a press in progress (the signal was lost mid-press)."""
+        ...
+
 
 class BlinkDetector:
     def __init__(self):
@@ -46,6 +50,9 @@ class BlinkDetector:
             self._closure_ended(start, t - start, t, events)
             self._flush(t, events)
         return events
+
+    def cancel(self) -> None:
+        self.closed_since = None
 
     def _flush(self, t, events):
         """Emit the pending click once its window has passed, unless a closure is still running
