@@ -4,7 +4,22 @@ Run this on the laptop itself, not over Remote Desktop. Fill in the **Result** c
 
 ## 1. Set up
 
-Needs Python 3.10 or newer and Git.
+**Option A: portable build (no Python needed).** Unzip `GazeMouse-0.1.0-portable.zip` anywhere, open
+PowerShell in the `GazeMouse` folder, and in the commands below use:
+
+| Instead of | Use |
+|---|---|
+| `.venv\Scripts\python -m gazemouse ...` | `.\GazeMouse.exe ...` |
+| `.venv\Scripts\python -m gazemouse.tools.camcheck ...` | `.\CamCheck.exe ...` |
+
+Skip the pytest step. Windows SmartScreen will warn because the build is unsigned: "More info" → "Run
+anyway". `GazeMouse.exe` has no console; its warnings go to `%APPDATA%\GazeMouse\gazemouse.log`.
+`snapcheck` is not in the portable build.
+
+To rebuild it on the dev box: `.venv/Scripts/python -m pip install pyinstaller`, then
+`.venv/Scripts/python -m PyInstaller packaging/gazemouse.spec --noconfirm --distpath <out> --workpath <tmp>`.
+
+**Option B: from source.** Needs Python 3.10 or newer and Git.
 
 ```powershell
 git clone -b plan1-core-control https://github.com/mohamed-ibrahim47/gaze-mouse.git
