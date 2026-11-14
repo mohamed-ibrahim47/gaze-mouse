@@ -54,9 +54,24 @@ accuracy worse, so the model uses only the four eye features and head movement i
 | A | Current features + ridge | No | 5.3% of screen width (our spike) | Clean | Done |
 | B | Same features, normalised by head pose and distance before the regression | Partly | Not measured | Clean | Low |
 | C | 3D geometric model: eyeball centre + iris gives a gaze ray, intersected with the screen plane; calibration fits a small personal offset | Yes, by construction | Noisy at webcam resolution; no solid number found | Clean | Medium |
-| D | Small appearance-based CNN + few-shot personal calibration (WebEyeTrack, 2025) | Yes (takes head pose as input) | 2.32 cm on GazeCapture with 9 calibration samples; 670 KB model | Code is MIT. **Licence of the weights' training data not checked yet** | Medium to high |
+| D | Small appearance-based CNN + few-shot personal calibration (WebEyeTrack, 2025) | Yes (takes head pose as input) | 2.32 cm on GazeCapture with 9 calibration samples; 670 KB model | Code is MIT. Weights sit in the same repo with no separate licence, but see the note below | Medium to high |
 | E | Google's model (Valliappan et al. 2020) | Yes | About 0.5 cm on phones after calibration | **Model not released** | High (retrain) |
 | F | iTracker / GazeCapture (2016) | Yes | 1.3 to 1.7 cm on phones | Dataset believed research-only; verify | High |
+
+**WebEyeTrack licence check (2026-11-14).** The repo (RedForestAI/WebEyeTrack) is MIT and its README
+says that covers "personal, academic, and commercial use". The TF.js weights are shipped inside the
+repo with no separate terms. The repo does not say which dataset the released weights were trained
+on; the training scripts cover MPIIFaceGaze, GazeCapture and EyeDiap. GazeCapture's licence allows
+research use only, and the other two are believed to be non-commercial or research-only as well (not
+confirmed). Whether a model inherits its training data's terms is not settled law. So: fine for a
+free, non-commercial tool, but the weights should not be bundled into the GPL-3.0 release, because
+GPL grants everyone commercial use. Download them at setup with their own notice, as
+`scripts/fetch_model.py` does for the face model. The Python package also needs TensorFlow 2.x, so
+the model would have to be converted (TFLite or ONNX) to avoid that dependency.
+
+**What D would replace:** only the features and the ridge model (steps 2 and 3 in section 2).
+MediaPipe, the filter, blinks, snap and the controller stay. WebEyeTrack itself runs on MediaPipe
+landmarks.
 
 **Recommendation:** keep A for Plan 1. If the laptop acceptance run shows drift from head movement,
 try B first, then D, with C as the fallback if D's weights cannot ship under GPL-3.0. Choose by
