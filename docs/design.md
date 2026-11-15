@@ -116,6 +116,14 @@ The spike code is reference only. Don't build on it; rewrite cleanly.
 3. **Head fine-aim:** small head movements nudge the cursor the last few pixels. **Optional setting,
    off by default** (many ALS users can't move their head reliably).
 
+### 5.2a Steady cursor (added after the first laptop test, 2026-11-15)
+- **Blink freeze:** closing lids cover the top of the iris and drag the reading down. The cursor is
+  held on the gaze from just before the lids moved, through the blink and 0.2 s after.
+- **Calm glide:** the cursor rests while the gaze stays within 2% of the screen width of it, and
+  glides at a capped speed when the gaze really moves.
+- **Sticky snap:** once on a target the cursor stays until the gaze favours another target for
+  0.3 s, or clearly leaves.
+
 ### 5.3 Pressing: blinks, no dwell (user's call)
 - **Long blink** (about 0.5 s, both eyes) = **left click** on the current (snapped) target.
 - **Double long blink** = double click.
@@ -129,8 +137,9 @@ The spike code is reference only. Don't build on it; rewrite cleanly.
 ### 5.4 The hidden edge strip: option C (user's choice; mockup in `.superpowers/brainstorm/`)
 - Normally only a **thin glowing line on the right screen edge**.
 - Looking at the line slides out a see-through column of large buttons:
-  **Scroll up · Scroll down · Right click · Select/drag · Keyboard · Pause**. Looking back at the page
-  hides it.
+  **Scroll up · Scroll down · Right click · Select/drag · Keyboard · Pause · Recalibrate · Quit**.
+  Looking back at the page hides it. (Recalibrate and Quit added after the first laptop test: the tray
+  menu needs a real mouse. Quit needs a second blink within 5 s.)
 - Buttons are pressed with a long blink like anything else. Each button is about 2× the measured gaze error.
 - **Scroll:** long blink on a scroll button starts scrolling; it continues while the eyes stay on the
   button; looking away stops it. Scrolls the window under the last page position the user was aiming at.
