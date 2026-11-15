@@ -26,7 +26,8 @@ TEXT = QColor(255, 255, 255)
 
 BUTTON_LABELS = {StripButton.SCROLL_UP: "▲ Scroll up", StripButton.SCROLL_DOWN: "▼ Scroll down",
                  StripButton.RIGHT_CLICK: "Right click", StripButton.SELECT: "Select / drag",
-                 StripButton.KEYBOARD: "Keyboard", StripButton.PAUSE: "Pause"}
+                 StripButton.KEYBOARD: "Keyboard", StripButton.PAUSE: "Pause",
+                 StripButton.RECALIBRATE: "Recalibrate", StripButton.QUIT: "Quit"}
 MODE_BADGES = {Mode.RIGHT_ONCE: "Right click next", Mode.SELECT_START: "Select: blink at start",
                Mode.DRAGGING: "Dragging", Mode.SCROLLING: "Scrolling"}
 PAUSED_TEXT = "Paused — close eyes 2 s to resume"

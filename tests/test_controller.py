@@ -2,7 +2,7 @@ import pytest
 
 from gazemouse.actions import VK_ESCAPE
 from gazemouse.blink import BlinkDetector, PressTrigger
-from gazemouse.controller import Controller, Mode
+from gazemouse.controller import QUIT_CONFIRM_S, Controller, Mode
 from gazemouse.geometry import Rect
 from gazemouse.strip import StripButton, StripLayout
 
@@ -440,3 +440,39 @@ def test_cursor_stays_on_a_target_while_the_gaze_wobbles_to_its_neighbour():
     assert {c[1] for c in rig.fake.named("move")} == {(1050, 520)}
     rig.run((0.5, (1050, 580), False))  # a real look at the neighbour
     assert rig.fake.last_move() == (1050, 580)
+
+
+def test_recalibrate_button_asks_the_app():
+    rig = Rig()
+    rig.press(StripButton.RECALIBRATE)
+    assert rig.ctrl.take_commands() == ["recalibrate"]
+    assert rig.ctrl.take_commands() == []
+
+
+def test_quit_needs_a_second_blink():
+    rig = Rig()
+    s = rig.press(StripButton.QUIT)
+    assert rig.ctrl.take_commands() == [] and "again" in s.message
+    rig.press(StripButton.QUIT)
+    assert rig.ctrl.take_commands() == ["quit"]
+
+
+def test_quit_confirmation_runs_out():
+    rig = Rig()
+    rig.press(StripButton.QUIT)
+    rig.run((QUIT_CONFIRM_S, P1, False))
+    rig.press(StripButton.QUIT)
+    assert rig.ctrl.take_commands() == []
+
+
+def test_another_button_cancels_the_quit_confirmation():
+    rig = Rig()
+    rig.press(StripButton.QUIT)
+    rig.press(StripButton.RIGHT_CLICK)
+    rig.press(StripButton.QUIT)
+    assert rig.ctrl.take_commands() == []
+
+
+def test_every_strip_button_has_a_label():
+    from gazemouse.overlay import BUTTON_LABELS
+    assert set(BUTTON_LABELS) == set(StripButton)

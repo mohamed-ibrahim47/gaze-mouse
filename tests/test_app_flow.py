@@ -424,3 +424,17 @@ def test_cursor_glides_to_a_new_gaze_point(qapp):
     blink_for(app, 2.0, t, point=(1100, 400))
     assert abs(app.actuator.last_move()[0] - 1100) < 25
     app.quit()
+
+
+def test_strip_commands_reach_the_app(qapp):
+    with_profile()
+    app = make_app(qapp)
+    app.start()
+    app.on_observed(face(0.0), 0.0)
+    app.controller.commands.append("recalibrate")
+    app.on_observed(face(0.1), 0.1)
+    assert app.calib is not None
+    app.on_calibrated(CalibrationResult(False, "cancelled", None, None, None, 0, 0))
+    app.controller.commands.append("quit")
+    app.on_observed(face(0.2), 0.2)
+    assert app.exit_code == 0

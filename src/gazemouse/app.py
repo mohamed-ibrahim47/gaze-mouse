@@ -250,6 +250,11 @@ class GazeApp(QObject):
                 self.targets.set_point(gaze)
         self.state = self.controller.step(t, gaze, closed)
         self.overlay.show_state(self.state, self.controller.layout)
+        for command in self.controller.take_commands():  # strip buttons: the tray needs a real mouse
+            if command == "recalibrate":
+                self.recalibrate()
+            elif command == "quit":
+                self.quit()
 
     def on_camera_info(self, info) -> None:
         self.camera_info = info

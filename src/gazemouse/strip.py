@@ -8,7 +8,7 @@ EDGE_ZONE_X = 0.95         # gaze at x >= 0.95 W counts as "at the edge" (gaze e
 EDGE_ZONE_OVERSHOOT = 0.05  # ...up to 5% past the edge; further out is looking off the screen
 EDGE_LINE_MIN_PX, EDGE_LINE_W = 6, 0.006
 BUTTON_W, MARGIN_R = 0.12, 0.02
-BUTTONS_TOP, BUTTONS_BOTTOM, GAP = 0.08, 0.88, 0.015
+BUTTONS_TOP, BUTTONS_BOTTOM, GAP = 0.04, 0.96, 0.015  # 8 buttons: use the height, keep them tall
 PANEL_PAD = 0.02
 REVEAL_S = 0.3
 HIDE_S = 0.4
@@ -23,6 +23,8 @@ class StripButton(Enum):  # top to bottom
     SELECT = "select"
     KEYBOARD = "keyboard"
     PAUSE = "pause"
+    RECALIBRATE = "recalibrate"
+    QUIT = "quit"
 
 
 class StripLayout:
@@ -37,7 +39,7 @@ class StripLayout:
         bx = w - (MARGIN_R + BUTTON_W) * w
         self.buttons = {b: Rect(bx, BUTTONS_TOP * h + i * (bh + GAP * h), BUTTON_W * w, bh)
                         for i, b in enumerate(StripButton)}
-        first, last = self.buttons[StripButton.SCROLL_UP], self.buttons[StripButton.PAUSE]
+        first, last = (self.buttons[b] for b in (list(StripButton)[0], list(StripButton)[-1]))
         self.panel = Rect(bx, first.y, BUTTON_W * w, last.y + last.h - first.y).expanded(PANEL_PAD * w)
 
     def button_at(self, pt) -> StripButton | None:

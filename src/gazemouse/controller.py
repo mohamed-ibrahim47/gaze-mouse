@@ -21,6 +21,8 @@ DRAG_NO_GAZE_S = 10.0    # face still there, but looking away or eyes shut
 DRAG_GOOD_GAZE_S = 1.0   # this much steady gaze clears the timers; a flicker of face doesn't
 FACE_GLITCH_S = 0.1      # a face lost for less than this inside a closure is one bad frame
 MESSAGE_S = 2.0
+QUIT_CONFIRM_S = 5.0     # Quit needs a second blink this soon: nobody may be there to start the app again
+QUIT_CONFIRM = "Blink on Quit again to close Gaze Mouse"
 # A click fires up to 0.2 + 1.5 + 0.6 s after its aim; a slow double up to about 4 s after.
 HISTORY_S = 5.0
 
@@ -66,9 +68,15 @@ class Controller:
         self.drag_bad_since, self.drag_good_since = None, None
         self.scroll_rect, self.scroll_dir, self.next_wheel = None, 0, 0.0
         self.message, self.message_s, self.message_until = None, 0.0, None
+        self.commands = []            # "recalibrate" / "quit", for the app to take
+        self.quit_armed_until = None
         self.t = 0.0
 
     # --- outside controls ---
+
+    def take_commands(self) -> list[str]:
+        taken, self.commands = self.commands, []
+        return taken
 
     def toggle_pause(self) -> None:
         self.paused = not self.paused
@@ -240,7 +248,17 @@ class Controller:
             self.act.click("left")
 
     def _press_button(self, button: StripButton) -> None:
-        if button is StripButton.RIGHT_CLICK:
+        armed = self.quit_armed_until is not None and self.t <= self.quit_armed_until
+        self.quit_armed_until = None
+        if button is StripButton.QUIT:
+            if armed:
+                self.commands.append("quit")
+            else:
+                self.quit_armed_until = self.t + QUIT_CONFIRM_S
+                self.say(QUIT_CONFIRM, QUIT_CONFIRM_S)
+        elif button is StripButton.RECALIBRATE:
+            self.commands.append("recalibrate")
+        elif button is StripButton.RIGHT_CLICK:
             self.mode = Mode.RIGHT_ONCE
         elif button is StripButton.SELECT:
             self.mode = Mode.SELECT_START
