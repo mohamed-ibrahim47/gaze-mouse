@@ -136,3 +136,57 @@ def test_com_error_returns_what_was_found():
         return link
 
     assert provider(hit).targets_near((100, 60), 40) == [Rect(50, 50, 100, 20)]
+
+
+# --- sticky snapping: a wobbling gaze must not flip the cursor between neighbours ---
+
+from gazemouse.snap import SWITCH_S, StickySnap
+
+S_A, S_B = Rect(1000, 500, 100, 40), Rect(1000, 560, 100, 40)  # stacked, 20 px apart
+S_R = 150
+IN_A, IN_B = (1050, 520), (1050, 580)
+FAR = (200, 1200)
+
+
+def test_sticky_first_target_locks_at_once():
+    s = StickySnap(S_R)
+    r = s.update(0.0, IN_A, [S_A, S_B])
+    assert r.rect == S_A and r.point == S_A.center
+
+
+def test_sticky_brief_wobble_onto_a_neighbour_keeps_the_lock():
+    s = StickySnap(S_R)
+    s.update(0.0, IN_A, [S_A, S_B])
+    assert s.update(0.05, IN_B, [S_A, S_B]).rect == S_A
+    assert s.update(0.10, IN_A, [S_A, S_B]).rect == S_A
+    # the wobble's time doesn't add up across visits
+    assert s.update(0.10 + SWITCH_S - 0.01, IN_B, [S_A, S_B]).rect == S_A
+
+
+def test_sticky_steady_look_at_the_neighbour_switches():
+    s = StickySnap(S_R)
+    s.update(0.0, IN_A, [S_A, S_B])
+    assert s.update(0.1, IN_B, [S_A, S_B]).rect == S_A
+    assert s.update(0.1 + SWITCH_S, IN_B, [S_A, S_B]).rect == S_B
+
+
+def test_sticky_look_far_away_lets_go_at_once():
+    s = StickySnap(S_R)
+    s.update(0.0, IN_A, [S_A, S_B])
+    r = s.update(0.02, FAR, [S_A, S_B])
+    assert r.rect is None and r.point == FAR
+
+
+def test_sticky_just_outside_the_radius_holds_for_a_moment():
+    s = StickySnap(S_R)
+    s.update(0.0, IN_A, [S_A])
+    edge = (S_A.x + S_A.w + S_R + 10, 520)  # plain snap says "nothing", but it's still close
+    assert s.update(0.05, edge, [S_A]).rect == S_A
+    assert s.update(0.05 + SWITCH_S, edge, [S_A]).rect is None
+
+
+def test_sticky_reset_forgets_the_lock():
+    s = StickySnap(S_R)
+    s.update(0.0, IN_A, [S_A, S_B])
+    s.reset()
+    assert s.update(0.01, IN_B, [S_A, S_B]).rect == S_B

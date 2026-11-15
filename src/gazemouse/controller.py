@@ -9,7 +9,7 @@ from typing import Callable
 from .actions import VK_ESCAPE, Actuator
 from .blink import AIM_BACK_S, BlinkDetector, BlinkEvent, GazeHistory, PressTrigger
 from .geometry import Rect
-from .snap import snap
+from .snap import StickySnap
 from .strip import StripButton, StripLayout, StripReveal
 
 OFF_SCREEN_MARGIN = 0.1  # gaze further outside than this fraction of the screen is "away"
@@ -51,6 +51,7 @@ class Controller:
         self.w, self.h = screen_w, screen_h
         self.act, self.targets, self.snap_radius = actuator, targets, snap_radius
         self.presses = presses or BlinkDetector()
+        self.sticky = StickySnap(snap_radius)
         self.layout = StripLayout(screen_w, screen_h)
         self.reveal = StripReveal(self.layout)
         self.history = GazeHistory(HISTORY_S)        # None samples mark "looking away"
@@ -156,11 +157,13 @@ class Controller:
         self._move(point)
 
     def _aim(self, point):
-        return snap(point, self.targets(), self.snap_radius)
+        return self.sticky.update(self.t, point, self.targets())
 
     def _track_page(self, point) -> Rect | None:
         rect, aimed = None, point
-        if self.mode is not Mode.SELECT_START:  # a nearby link must not pull a text selection away
+        if self.mode is Mode.SELECT_START:  # a nearby link must not pull a text selection away
+            self.sticky.reset()
+        else:
             s = self._aim(point)
             rect, aimed = s.rect, s.point
         self._move(aimed)

@@ -12,6 +12,8 @@ CLICKABLE = {f"{n}Control" for n in ("Button", "Hyperlink", "Edit", "ListItem", 
                                      "DataItem")}
 MAX_PARENTS = 3
 MAX_AREA = 0.25  # of the screen: bigger "targets" are panes, not things to click
+SWITCH_S = 0.3   # the gaze must favour another target this long before the lock moves to it
+RELEASE = 1.5    # x radius: a look further than this from the locked target lets go at once
 
 
 @dataclass
@@ -32,6 +34,38 @@ def snap(point, candidates: list[Rect], radius: float) -> SnapResult:
             return SnapResult(tuple(point), None)
         best = min(near, key=lambda dr: dr[0])[1]
     return SnapResult(best.center, best)
+
+
+class StickySnap:
+    """Snap that holds on: once on a target, the cursor stays there until the gaze has clearly left.
+
+    Plain snap picks the nearest target on every frame, so a gaze wobbling between two
+    neighbours makes the cursor flip between them.
+    """
+
+    def __init__(self, radius: float, switch_s: float = SWITCH_S):
+        self.radius, self.switch_s = radius, switch_s
+        self.reset()
+
+    def reset(self) -> None:
+        self.locked = None                         # the Rect the cursor is held on
+        self.other, self.other_since = None, None  # what plain snap prefers instead, and since when
+
+    def update(self, t: float, point, candidates: list[Rect]) -> SnapResult:
+        cand = snap(point, candidates, self.radius).rect
+        if self.locked is None or cand == self.locked                 or self.locked.distance_to(point) > RELEASE * self.radius:
+            self._lock(cand)
+        else:
+            if self.other_since is None or cand != self.other:
+                self.other, self.other_since = cand, t
+            if t - self.other_since >= self.switch_s - 1e-9:
+                self._lock(cand)
+        if self.locked is None:
+            return SnapResult(tuple(point), None)
+        return SnapResult(self.locked.center, self.locked)
+
+    def _lock(self, rect) -> None:
+        self.locked, self.other, self.other_since = rect, None, None
 
 
 def _uia_control_from_point(x, y):

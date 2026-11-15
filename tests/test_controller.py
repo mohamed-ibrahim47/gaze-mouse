@@ -425,3 +425,18 @@ def test_one_lost_frame_does_not_split_a_pause():  # review 4
     rig = Rig()
     s = rig.run((0.5, P1, False), (1.2, None, True), (1 / 60, None, None), (1.2, None, True), (0.3, P1, False))
     assert s.paused and rig.fake.without_moves() == []
+
+
+# --- laptop feedback: steadier cursor, quit and recalibrate by eye ---
+
+def test_cursor_stays_on_a_target_while_the_gaze_wobbles_to_its_neighbour():
+    b = Rect(1000, 560, 100, 40)  # just under A
+    rig = Rig()
+    rig.ctrl.targets = lambda: [A, b]
+    rig.run((0.2, (1050, 520), False))
+    assert rig.fake.last_move() == (1050, 520)
+    for _ in range(5):  # 50 ms on the neighbour, 50 ms back
+        rig.run((0.05, (1050, 580), False), (0.05, (1050, 520), False))
+    assert {c[1] for c in rig.fake.named("move")} == {(1050, 520)}
+    rig.run((0.5, (1050, 580), False))  # a real look at the neighbour
+    assert rig.fake.last_move() == (1050, 580)
