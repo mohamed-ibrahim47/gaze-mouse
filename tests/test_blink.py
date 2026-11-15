@@ -138,3 +138,70 @@ def test_stall_in_a_closure_discards_it_even_with_enough_frames(d):  # review 4
     for i in range(60):
         out += d.update(1.52 + i / 60, False)
     assert out == []
+
+
+# --- LidGuard: freeze the cursor while the lids are on their way down or back up ---
+
+from gazemouse.blink import HOLD_MAX_S, SETTLE_S, LidGuard
+
+F = 1 / 30
+
+
+def guard_feed(g, t, seconds, lids, closed=False):
+    held = []
+    for _ in range(round(seconds / F)):
+        held.append(g.update(t, lids, closed))
+        t += F
+    return held, t
+
+
+def test_guard_open_eyes_never_hold():
+    held, _ = guard_feed(LidGuard(), 0.0, 2.0, 0.1)
+    assert not any(held)
+
+
+def test_guard_holds_from_the_first_lid_drop_until_after_reopening():
+    g = LidGuard()
+    _, t = guard_feed(g, 0.0, 1.0, 0.1)
+    drop, t = guard_feed(g, t, 0.1, 0.45)             # lids coming down, not closed yet
+    shut, t = guard_feed(g, t, 0.6, 0.9, closed=True)
+    back, t = guard_feed(g, t, SETTLE_S - F, 0.1)     # just reopened: the iris reading isn't settled
+    later, t = guard_feed(g, t + F, 0.5, 0.1)
+    assert all(drop) and all(shut) and all(back) and not any(later)
+
+
+def test_guard_looking_down_only_holds_briefly():
+    g = LidGuard()
+    _, t = guard_feed(g, 0.0, 1.0, 0.1)
+    held, t = guard_feed(g, t, 2.0, 0.45)  # score up and staying up, lids never close
+    assert held[0] and not any(held[round((HOLD_MAX_S + 2 * F) / F):])
+    # the new level is normal now: a blink from here is caught again
+    _, t = guard_feed(g, t, 0.1, 0.4)
+    drop, _ = guard_feed(g, t, 0.1, 0.75)
+    assert all(drop)
+
+
+def test_guard_small_flicker_is_ignored():
+    g = LidGuard()
+    _, t = guard_feed(g, 0.0, 1.0, 0.1)
+    held, _ = guard_feed(g, t, 0.3, 0.2)
+    assert not any(held)
+
+
+def test_guard_frozen_point_is_from_before_the_lids_moved():
+    g = LidGuard()
+    t = 0.0
+    for _ in range(30):
+        g.update(t, 0.1, False)
+        g.remember(t, (500, 400))
+        t += F
+    g.update(t, 0.15, False)        # the drop has begun but is too small to notice yet
+    g.remember(t, (500, 430))
+    t += F
+    assert g.update(t, 0.45, False)
+    assert g.frozen == (500, 400)
+
+
+def test_guard_no_history_means_nothing_to_freeze_on():
+    g = LidGuard()
+    assert g.update(0.0, 0.9, True) and g.frozen is None

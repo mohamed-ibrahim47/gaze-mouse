@@ -1,5 +1,6 @@
 """Eyes-closed signal -> click / double / pause events, and the recent gaze to aim them at."""
 from bisect import bisect_right
+from statistics import median
 from collections import deque
 from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
@@ -13,6 +14,13 @@ AIM_BACK_S = 0.2       # aim at the gaze from just before the eyes started closi
 OPEN_CONFIRM_S = 0.08  # one open frame inside a closure is noise; this long open ends it
 MIN_CLOSED_FRAMES = 3  # fewer closed frames than this isn't evidence of a deliberate blink
 MAX_FRAME_GAP_S = 0.25 # a camera stall inside a closure makes its length meaningless
+# LidGuard. A closing lid covers the top of the iris, so the gaze reads lower and lower before the
+# eyes count as closed, and again while they reopen.
+LID_RISE = 0.2         # blink score this far above its recent normal: the lids are moving
+LID_BASELINE_S = 1.0   # "recent normal" is the median over this long
+HOLD_MAX_S = 0.4       # a rise that never becomes a closure is a look down or a squint: let go
+HOLD_BACK_S = 0.1      # freeze on the gaze from this long before the rise was noticed
+SETTLE_S = 0.2         # keep holding this long after the eyes reopen
 EPS = 1e-9
 
 
@@ -124,3 +132,48 @@ class GazeHistory:
         """Latest sample at or before t."""
         i = bisect_right([s[0] for s in self.samples], t + EPS)
         return self.samples[i - 1][1] if i else None
+
+
+class LidGuard:
+    """Says when to freeze the cursor because the lids are moving, and where to freeze it."""
+
+    def __init__(self):
+        self.scores = deque()     # (t, score) while not holding: the recent normal
+        self.points = GazeHistory(LID_BASELINE_S)
+        self.hold_since = None
+        self.settle_until = None  # set by a closure
+        self.gave_up = False      # the rise outlasted HOLD_MAX_S; wait for it to become normal
+        self.frozen = None
+
+    def remember(self, t: float, gaze: tuple[float, float]) -> None:
+        """A gaze point that was shown while not holding."""
+        self.points.push(t, gaze)
+
+    def update(self, t: float, lids: float, closed: bool) -> bool:
+        """lids: the blink score both eyes have reached (the lower of the two). True means hold."""
+        if closed:
+            self._hold(t)
+            self.settle_until = t + SETTLE_S
+            return True
+        if self.settle_until is not None:
+            if t < self.settle_until - EPS:
+                return True
+            self.settle_until = self.hold_since = None
+        high = bool(self.scores) and lids - median(s for _, s in self.scores) >= LID_RISE - EPS
+        if high and not self.gave_up:
+            self._hold(t)
+            if t - self.hold_since <= HOLD_MAX_S + EPS:
+                return True
+            self.gave_up = True
+        if not high:
+            self.gave_up = False
+        self.hold_since = None
+        self.scores.append((t, lids))
+        while self.scores[0][0] < t - LID_BASELINE_S:
+            self.scores.popleft()
+        return False
+
+    def _hold(self, t) -> None:
+        if self.hold_since is None:
+            self.hold_since = t
+            self.frozen = self.points.at(t - HOLD_BACK_S)

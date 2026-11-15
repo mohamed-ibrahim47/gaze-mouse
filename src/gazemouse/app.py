@@ -13,13 +13,13 @@ from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from .actions import SendInputActuator, primary_screen_size, set_dpi_awareness
-from .blink import is_closed
+from .blink import LidGuard, is_closed
 from .calibration import CalibrationResult
 from .calibration_ui import GOOD_PCT, RESULT_S, CalibrationWindow
 from .camera import slow_or_small
 from .controller import Controller, OverlayState
 from .features import extract_features
-from .filters import OneEuro
+from .filters import CalmCursor, OneEuro
 from .gaze_model import GazeModel
 from .landmarks import MODEL_PATH
 from .overlay import Overlay
@@ -86,6 +86,8 @@ class GazeApp(QObject):
         self.overlay = Overlay()
         self.overlay.cover_primary()
         self.filter = OneEuro()
+        self.calm = CalmCursor(screen_w)
+        self.guard = LidGuard()
         self.model: GazeModel | None = None
         self.controller: Controller | None = None
         self.calib: CalibrationWindow | None = None
@@ -194,8 +196,13 @@ class GazeApp(QObject):
 
     def _start_control(self) -> None:
         self.controller = Controller(self.w, self.h, self.actuator, self.targets.targets, SNAP_RADIUS * self.w)
-        self.filter.reset()
+        self._reset_smoothing()
         self.overlay.show()
+
+    def _reset_smoothing(self) -> None:
+        self.filter.reset()
+        self.calm.reset()
+        self.guard = LidGuard()
 
     def toggle_pause(self) -> None:
         if self.controller is not None:
@@ -229,12 +236,17 @@ class GazeApp(QObject):
         gaze = None
         if obs is None:
             closed = None
-            self.filter.reset()  # after a gap, start from where the eyes are, not a glide
+            self._reset_smoothing()  # after a gap, start from where the eyes are, not a glide
         else:
             # Both must agree. Laughing or looking down raises the blink score with the lids still apart.
             closed = is_closed(obs.blink_left, obs.blink_right) and feat is None
-            if feat is not None:
-                gaze = tuple(float(v) for v in self.filter(self.model.predict(feat), t))
+            # Moving lids cover part of the iris and drag the reading down: hold the cursor still.
+            held = self.guard.update(t, min(obs.blink_left, obs.blink_right), closed)
+            if feat is not None and held:
+                gaze = self.guard.frozen
+            elif feat is not None:
+                gaze = tuple(float(v) for v in self.calm(self.filter(self.model.predict(feat), t), t))
+                self.guard.remember(t, gaze)
                 self.targets.set_point(gaze)
         self.state = self.controller.step(t, gaze, closed)
         self.overlay.show_state(self.state, self.controller.layout)

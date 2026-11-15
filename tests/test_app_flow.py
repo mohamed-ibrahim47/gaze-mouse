@@ -396,3 +396,31 @@ def test_real_thread_drives_the_app(qapp):
         time.sleep(0.002)
     assert app.actuator.named("move") and app.camera_info == CameraInfo(1280, 720, 30.0)
     app.quit()
+
+
+# --- laptop feedback ---
+
+def test_cursor_does_not_dip_while_the_lids_come_down_and_the_click_lands_on_the_aim(qapp):
+    with_profile()
+    app = make_app(qapp)
+    app.start()
+    t = blink_for(app, 1.0, 0.0, point=(300, 200))
+    t = blink_for(app, 0.2, t, blink=0.45, lids=6, point=(300, 380))  # half shut: the iris reads low
+    t = blink_for(app, 0.6, t, blink=0.9, point=(300, 380))
+    t = blink_for(app, 0.1, t, blink=0.3, lids=7, point=(300, 330))   # reopening
+    blink_for(app, 1.0, t, point=(300, 200))
+    assert app.actuator.named("click") == [("click", ("left",))]
+    assert all(abs(y - 200) < 25 for _, (x, y) in app.actuator.named("move"))
+    app.quit()
+
+
+def test_cursor_glides_to_a_new_gaze_point(qapp):
+    with_profile()
+    app = make_app(qapp)
+    app.start()
+    t = blink_for(app, 0.5, 0.0, point=(200, 400))
+    t = blink_for(app, 0.1, t, point=(1100, 400))
+    assert app.actuator.last_move()[0] < 700       # on its way, not there yet
+    blink_for(app, 2.0, t, point=(1100, 400))
+    assert abs(app.actuator.last_move()[0] - 1100) < 25
+    app.quit()

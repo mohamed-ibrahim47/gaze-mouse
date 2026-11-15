@@ -33,3 +33,46 @@ def test_reset_forgets_history():
     run(f, [(0, 0)] * 30)
     f.reset()
     assert np.allclose(f(np.array([900.0, 900.0]), 10.0), (900, 900))
+
+
+# --- CalmCursor: rests while the gaze only wobbles, glides at a capped speed when it moves ---
+
+from gazemouse.filters import DEAD_ZONE, MAX_SPEED, CalmCursor
+
+CW = 2000
+
+
+def test_calm_starts_where_the_gaze_is():
+    assert np.allclose(CalmCursor(CW)(np.array([700.0, 300.0]), 0.0), (700, 300))
+
+
+def test_calm_ignores_wobble_inside_the_dead_zone():
+    rng = np.random.default_rng(2)
+    r = 0.9 * DEAD_ZONE * CW / np.sqrt(2)
+    wobble = np.array([1000, 500]) + rng.uniform(-r, r, (300, 2))
+    out = run(CalmCursor(CW), np.vstack([[(1000, 500)], wobble]))
+    assert np.ptp(out, axis=0).max() == 0
+
+
+def test_calm_glides_to_a_new_point_no_faster_than_the_cap():
+    pts = [(200, 500)] * 10 + [(1800, 500)] * 240
+    out = run(CalmCursor(CW), pts)
+    steps = np.abs(np.diff(out[:, 0]))
+    assert steps.max() <= MAX_SPEED * CW * DT + 1e-6
+    assert out[10 + 6][0] < 1000              # 0.1 s after the jump it is still on its way
+    assert abs(out[-1][0] - 1800) < 0.005 * CW  # ...and it arrives
+    assert np.all(np.diff(out[:, 0]) >= -1e-9)  # no overshoot
+
+
+def test_calm_rests_again_after_arriving():
+    f = CalmCursor(CW)
+    out = run(f, [(200, 500)] * 10 + [(1800, 500)] * 240)
+    still = run(f, [(1800 + 0.5 * DEAD_ZONE * CW, 500)] * 30, t0=250 * DT)
+    assert np.allclose(still, out[-1])
+
+
+def test_calm_reset_jumps_to_the_next_point():
+    f = CalmCursor(CW)
+    f(np.array([200.0, 500.0]), 0.0)
+    f.reset()
+    assert np.allclose(f(np.array([1800.0, 500.0]), 0.1), (1800, 500))
