@@ -8,7 +8,7 @@ real cursor, which snaps onto buttons and links. A long blink clicks. Looking at
 screen slides out a strip of large buttons for scrolling, right click, select/drag, the keyboard and
 pause. Everything runs on your computer. No camera images leave it.
 
-> **Status:** early development. Plan 1 (core control) is being built. Not ready for daily use yet.
+> **Status:** early development. Plan 1 (core control) is built and being tested on real laptops ([test guide](docs/test-log.md)). Not ready for daily use yet.
 
 ## How it works
 
@@ -45,6 +45,7 @@ laptop's 720p camera, gaze error was about 5% of the screen width.
 git clone https://github.com/mohamed-ibrahim47/gaze-mouse.git
 cd gaze-mouse
 python -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip   # old pip can't do editable installs
 .venv\Scripts\python -m pip install -e .[dev]
 .venv\Scripts\python scripts\fetch_model.py      # downloads the face model (~4 MB)
 .venv\Scripts\python -m pytest                   # unit tests
