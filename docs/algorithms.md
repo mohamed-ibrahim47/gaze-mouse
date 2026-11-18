@@ -77,6 +77,47 @@ landmarks.
 try B first, then D, with C as the fallback if D's weights cannot ship under GPL-3.0. Choose by
 replaying logged runs, as `design.md` section 7 says, not by paper numbers.
 
+## 5. What the head-movement spikes found (2026-11)
+
+Laptop runs by one person, 2560×1600 screen. Error is in % of screen width, averaged over 9 test dots.
+
+**D, WebEyeTrack (2 runs): dropped.** The weights were converted to ONNX and run without TensorFlow.
+Alone and as extra inputs to the ridge it was worse than A on this laptop, and the user disliked it
+live. Run 2 showed the real problem: A is 5.7% with the head still but 42.6% once the head turns (up to
+30°). Head yaw explained 75% of that error, at about 57 px per degree (geometry says 70).
+
+**Pursuit calibration (`spikes/pursuit/`, 2 runs).** Three new calibration steps and a new model:
+
+- A dot glides around the screen for 30 s while the eyes follow it. With the head still this is as
+  accurate as the 16 dots (10.5% against 10.8%). The eye's target is where the dot was a moment ago;
+  that delay is mostly the camera and processing (250 ms at 30 frames/s, 600 ms at 10).
+- The same glide with the head turning along.
+- A still dot held by the eyes while the head nods and turns. This separates head movement from eye
+  movement, because the gaze stays fixed while the head varies.
+- **Angle model:** the ridge (eye features + head yaw and pitch) predicts the angle from the eyes to the
+  gaze point, and the 3D head position (WebEyeTrack's face-origin geometry, MIT) turns that angle into
+  pixels. Head position and distance are handled by geometry instead of being learned. The learned yaw
+  weight came out at 0.93, close to the physical 1.0.
+
+| Run | Conditions | A, head still | A, head free | Best new, head still | Best new, head free |
+|---|---|---|---|---|---|
+| 1 (no hold step) | 30 frames/s, 54 cm | 10.8 | 41.6 | 7.7 | 21.5 |
+| 2 (with hold) | 10 frames/s, 70 cm | 13.5 | 35.2 | 9.1 | 15.4 |
+
+What run 2 shows:
+
+- The hold step fixed vertical error with the head free (16.6% → 10.8%). Leaving out the head-turning
+  glide helped too: head angle and dot position move together there, so the fit learns a shortcut.
+- On test dots where the head was within about 10° of the calibration pose, the new model scored
+  1.5–8% and A scored 14–35%. The large errors came from extreme poses: a 44° turn (31%) and nods of
+  24–27° (20–30%). At 40° one eye is partly hidden from the camera.
+- Run 2 was handicapped: the webcam ran at 10 frames/s (dim room or power saving), and sitting at 70 cm
+  made the eye movement across the screen 40% smaller in the image than at 54 cm.
+
+**Recommendation now:** move the app to the angle model with glide + hold calibration (B in spirit,
+with the head term learned from the hold step), aiming at moderate head movement (about ±20°). C stays
+the fallback if larger head movement is needed.
+
 ## Sources
 
 - [WebEyeTrack (arXiv 2508.19544)](https://arxiv.org/abs/2508.19544)
