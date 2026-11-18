@@ -59,6 +59,8 @@ the eyes.
 
 - [Design](docs/design.md): goals, decisions and why
 - [Plan 1: core control](docs/superpowers/plans/2026-10-31-plan1-core-control.md)
+- [Gaze algorithms](docs/algorithms.md): what we use, what we tried for head movement, what's next
+- [Pursuit calibration spike](spikes/pursuit/README.md): the test bench behind those findings
 
 ## Licence
 
